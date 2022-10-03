@@ -1,4 +1,4 @@
-package org.succlz123.lib.imageloader.cache
+package org.succlz123.lib.imageloader.cache.core
 
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex

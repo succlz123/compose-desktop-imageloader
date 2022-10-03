@@ -1,9 +1,9 @@
 package org.succlz123.lib.imageloader.http
 
-import com.jakewharton.disklrucache.DiskLruCache
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.newFixedThreadPoolContext
+import org.succlz123.lib.imageloader.cache.core.DiskLruCache
 import org.succlz123.lib.imageloader.utils.ImageLoaderLogger
 import java.io.IOException
 import java.io.InputStream
@@ -11,17 +11,18 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 class HttpConnectionClient(
-    private val diskLruCache: DiskLruCache,
     private val threadPool: CoroutineDispatcher = newFixedThreadPoolContext(2, "Downloader"),
-) : IHttpClient {
+) {
 
     private val job = Job()
 
-    override fun dispatcher(): CoroutineDispatcher {
+    var diskLruCache: DiskLruCache? = null
+
+    fun dispatcher(): CoroutineDispatcher {
         return threadPool
     }
 
-    override suspend fun pullImage(url: String, key: String): ResponseData? {
+    suspend fun pullImage(url: String, key: String): ResponseData? {
         var conn: HttpURLConnection? = null
         var inputStream: InputStream? = null
         try {
@@ -42,8 +43,21 @@ class HttpConnectionClient(
                 return null
             }
             inputStream = conn.inputStream
-            saveImage(key, inputStream)
-            val snapshot = diskLruCache.get(key) ?: return null
+
+            diskLruCache?.getOrPut(key) { cacheFile ->
+                try {
+                    val outputStream = cacheFile.outputStream()
+                    inputStream.copyTo(outputStream)
+                    try {
+                        outputStream.close()
+                    } catch (e: Exception) {
+                    }
+                    true // Caching succeeded - Save the file
+                } catch (ex: IOException) {
+                    false
+                }
+            }
+            val snapshot = diskLruCache?.get(key) ?: return null
             return ResponseData(contentTypeString, contentLength, snapshot)
         } catch (error: Throwable) {
             error.printStackTrace()
@@ -57,25 +71,8 @@ class HttpConnectionClient(
         }
     }
 
-    override fun close() {
+    fun close() {
         job.cancel()
-    }
-
-    private fun saveImage(key: String, inputStream: InputStream) {
-        if (diskLruCache.get(key) != null) {
-            return
-        }
-        val editor = diskLruCache.edit(key)
-        if (editor != null) {
-            val outputStream = editor.newOutputStream(0)
-            try {
-                inputStream.copyTo(outputStream)
-                editor.commit()
-            } catch (e: Exception) {
-                editor.abort()
-            }
-        }
-        diskLruCache.flush()
     }
 
     private fun debugLog(msg: String) {
@@ -84,9 +81,7 @@ class HttpConnectionClient(
 
     @Throws(IOException::class)
     private fun String.openConnection(
-        ua: String?,
-        connectTimeout: Int = 6000,
-        readTimeout: Int = 6000
+        ua: String?, connectTimeout: Int = 6000, readTimeout: Int = 6000
     ): HttpURLConnection {
         val connection = URL(this).openConnection() as HttpURLConnection
         if (ua != null) {

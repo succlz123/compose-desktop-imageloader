@@ -1,11 +1,11 @@
 package org.succlz123.lib.imageloader.http
 
-import com.jakewharton.disklrucache.DiskLruCache
+import java.io.File
 
 class ResponseData(
     val contentType: String,
     val contentLength: Int = 0,
-    val contentSnapshot: DiskLruCache.Snapshot
+    val contentSnapshot: File
 ) {
 
     var imageType: ImageType? = null

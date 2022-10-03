@@ -1,12 +1,11 @@
 package org.succlz123.lib.imageloader.core
 
 import androidx.compose.ui.res.loadImageBitmap
-import com.jakewharton.disklrucache.DiskLruCache
 import kotlinx.coroutines.*
-import org.succlz123.lib.imageloader.cache.LruDiskUtil
+import org.succlz123.lib.imageloader.cache.LruUtil
 import org.succlz123.lib.imageloader.cache.MemoryCache
+import org.succlz123.lib.imageloader.cache.core.DiskLruCache
 import org.succlz123.lib.imageloader.http.HttpConnectionClient
-import org.succlz123.lib.imageloader.http.IHttpClient
 import org.succlz123.lib.imageloader.transform.ITransformation
 import org.succlz123.lib.imageloader.utils.ImageLoaderLogger
 import java.io.File
@@ -30,7 +29,6 @@ class ImageLoader(
 ) {
 
     companion object {
-        const val VERSION = 1
         const val CACHE_DEFAULT_MEMORY_SIZE = 1024 * 1024 * 300L
         const val CACHE_DEFAULT_DISK_SIZE = 1024 * 1024 * 100L
         val USER_DIR = File(System.getProperty("user.dir"))
@@ -68,13 +66,13 @@ class ImageLoader(
 
     private val scope = CoroutineScope(job)
 
-    private var diskLruCache: DiskLruCache
+    private var diskLruCache: DiskLruCache? = null
 
     private var memoryLruCache: MemoryCache
 
     private var imageCacheDir: File
 
-    private val client: IHttpClient
+    private val client: HttpConnectionClient
 
     private val loadingImageMap = HashMap<String, Boolean>()
 
@@ -85,9 +83,13 @@ class ImageLoader(
                 throw IllegalStateException("Could not create image cache directory: ${imageCacheDir.absolutePath}")
             }
         }
-        diskLruCache = DiskLruCache.open(imageCacheDir, VERSION, 1, maxDiskCacheSize)
         memoryLruCache = MemoryCache(maxMemoryCacheSize)
-        client = HttpConnectionClient(diskLruCache)
+        client = HttpConnectionClient()
+
+        scope.launch {
+            diskLruCache = DiskLruCache.open(directory = imageCacheDir, maxSize = maxDiskCacheSize)
+            client.diskLruCache = diskLruCache
+        }
     }
 
     private fun debugLog(msg: String) {
@@ -108,7 +110,7 @@ class ImageLoader(
 
     private suspend fun runFileLoad(file: File, transformers: MutableList<ITransformation>): ImageResponse {
         return scope.async(dispatcher) {
-            val key = LruDiskUtil.hashKey(file.absolutePath) + transformers.transformationKey()
+            val key = LruUtil.hashKey(file.absolutePath) + transformers.transformationKey()
             val hasCache = memoryLruCache.getBitmap(key)
             if (hasCache != null) {
                 ImageResponse(hasCache.toBitmapPainter(), null)
@@ -134,7 +136,7 @@ class ImageLoader(
             return ImageResponse(null, NullPointerException("Url is null or empty!"))
         }
         val getJob = scope.async(dispatcher) {
-            val diskKey = LruDiskUtil.hashKey(url)
+            val diskKey = LruUtil.hashKey(url)
             val memoryKey = diskKey + request.transformers.transformationKey()
             val memoryImage = memoryLruCache.getBitmap(memoryKey)
             if (memoryImage != null) {
@@ -148,7 +150,7 @@ class ImageLoader(
             }
             try {
                 val cacheFile = try {
-                    diskLruCache.get(diskKey)
+                    diskLruCache?.get(diskKey)
                 } catch (e: IOException) {
                     null
                 }
@@ -164,7 +166,7 @@ class ImageLoader(
                         loadingImageMap[diskKey] = false
                         return@async ImageResponse(null, NullPointerException("Can't find the local image snapshot"))
                     } else {
-                        var imageBitmap = loadImageBitmap(newFetchedCache.getInputStream(0))
+                        var imageBitmap = loadImageBitmap(newFetchedCache.inputStream())
                         if (diskKey != memoryKey) {
                             for (transformer in request.transformers) {
                                 imageBitmap = transformer.transform(imageBitmap)
@@ -176,7 +178,7 @@ class ImageLoader(
                         return@async ImageResponse(imageBitmap.toBitmapPainter(), null)
                     }
                 } else {
-                    var imageBitmap = loadImageBitmap(cacheFile.getInputStream(0))
+                    var imageBitmap = loadImageBitmap(cacheFile.inputStream())
                     if (diskKey != memoryKey) {
                         for (transformer in request.transformers) {
                             imageBitmap = transformer.transform(imageBitmap)
@@ -206,7 +208,9 @@ class ImageLoader(
     }
 
     fun clearCache() {
-        diskLruCache.delete()
+        scope.launch {
+            diskLruCache?.clear()
+        }
     }
 
     inner class Request {

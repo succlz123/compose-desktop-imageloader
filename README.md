@@ -41,7 +41,7 @@ ImageAsyncVectorUrl("https://raw.githubusercontent.com/JetBrains/compose-jb/mast
 ## Download
 
 ```
-implementation("io.github.succlz123:compose-imageloader-desktop:0.0.1")
+implementation("io.github.succlz123:compose-imageloader-desktop:0.0.2")
 ```
 
 ## Thanks

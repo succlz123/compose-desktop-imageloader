@@ -2,6 +2,7 @@ package org.succlz123.lib.imageloader.cache
 
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.ImageBitmapConfig
+import org.succlz123.lib.imageloader.cache.core.LruCache
 import org.succlz123.lib.imageloader.utils.ImageLoaderLogger
 
 class MemoryCache(size: Long) {
